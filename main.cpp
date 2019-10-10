@@ -2,9 +2,22 @@
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/highgui.hpp"
 #include <iostream>
+#include <PolyVoxCore/CubicSurfaceExtractorWithNormals.h>
+#include <PolyVoxCore/MarchingCubesSurfaceExtractor.h>
+#include <PolyVoxCore/SurfaceMesh.h>
+#include <PolyVoxCore/SimpleVolume.h>
+#include <OpenMesh/Core/Mesh/PolyMesh_ArrayKernelT.hh>
+#include <OpenMesh/Core/IO/MeshIO.hh>
+#include <OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh>
+#include <OpenMesh/Tools/Utils/getopt.h>
+#include <vector>
+
+typedef OpenMesh::PolyMesh_ArrayKernelT<>  MyMesh;
+
 
 using namespace cv;
 using namespace std;
+using namespace PolyVox;
 
 class ImplicitSurface{
 
@@ -156,6 +169,22 @@ Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float 
 
 }
 
+Mat RegionSubtraction(const Mat& slice_i, const Mat& part_i, const Mat& slice_i_plus1, const Mat& part_i_plus1, const Mat& support_i_plus1, float selfSupportThreshold){
+
+    Mat support = Mat::zeros(slice_i.size(),slice_i.type());
+    Mat shadow = Mat::zeros(slice_i.size(),slice_i.type());
+
+    subtract(part_i_plus1, part_i, shadow);
+
+    Mat support_candidate = GrowingSwallow(shadow, part_i, part_i_plus1, selfSupportThreshold);
+
+    bitwise_or(support_candidate, support_i_plus1, support);
+    subtract(support, part_i, support);
+
+    return support;
+
+}
+
 static int selectedSlice = 0;
 
 int main(int argc, char const *argv[])
@@ -197,6 +226,8 @@ int main(int argc, char const *argv[])
     }
 
     Mat support[sliceNumber+1];
+    SimpleVolume<uint8_t> volData( Region(Vector3DInt32(0,0,0), Vector3DInt32(gridWidth, gridHeight, sliceNumber)));
+
 
     for(int z=0;z<sliceNumber;z++){
 
@@ -207,19 +238,57 @@ int main(int argc, char const *argv[])
 
     }
 
-   namedWindow("intersect_slice", WINDOW_AUTOSIZE);
-   createTrackbar( "Slice number", "intersect_slice", &selectedSlice, sliceNumber, on_trackbar );
+    for(int z=0;z<sliceNumber;z++){
 
-    bool exit = false;
+        cout << "Doing slice #" << z << endl;
 
-    while(!exit)
+        for(int x = 0; x < gridWidth; x++)
+        {
+            
+            for(int y = 0; y < gridHeight; y++)
+            {
+
+              volData.setVoxelAt(x,y,z,support[z].at<uint8_t>(x,y));
+
+            }
+            
+        }
+
+    }
+
+    SurfaceMesh<PositionMaterialNormal> surfaceMesh;
+    CubicSurfaceExtractorWithNormals< SimpleVolume<uint8_t> > surfaceExtractor(&volData, volData.getEnclosingRegion(), &surfaceMesh);
+
+    surfaceExtractor.execute();
+    
+    const vector<uint32_t>& vecIndices = surfaceMesh.getIndices();
+    const vector<PositionMaterialNormal>& vecVertices = surfaceMesh.getVertices();
+    
+    vector<MyMesh::VertexHandle> handles;
+    MyMesh om_mesh;
+
+    for(int i=0; i < vecVertices.size();i++){
+
+      Vector3DFloat pos = vecVertices.at(i).getPosition();
+
+      handles.push_back(om_mesh.add_vertex( MyMesh::Point( pos.getX(), pos.getY(), pos.getZ() ) ));
+
+    }
+
+    for(int i=0; i < vecIndices.size()-2;i+=3){
+
+      int index0 = vecIndices.at(i);
+      int index1 = vecIndices.at(i+1);
+      int index2 = vecIndices.at(i+2);
+
+      om_mesh.add_face( { handles.at(index0) , handles.at(index1), handles.at(index2) } );
+
+    }
+
+    if (!OpenMesh::IO::write_mesh(om_mesh, "output.obj")) 
     {
-        imshow("intersect_slice",M[selectedSlice]);
-        imshow("support_slice",support[selectedSlice]);
-        int key = waitKey(10);
-
-        exit = (key == 'q');
-
+      std::cerr << "write error\n";
+      exit(1);
     }
 
     return 0;
