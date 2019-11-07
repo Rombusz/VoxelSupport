@@ -14,7 +14,6 @@
 
 typedef OpenMesh::PolyMesh_ArrayKernelT<>  MyMesh;
 
-
 using namespace cv;
 using namespace std;
 using namespace PolyVox;
@@ -169,10 +168,10 @@ Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float 
 
 }
 
-Mat RegionSubtraction(const Mat& slice_i, const Mat& part_i, const Mat& slice_i_plus1, const Mat& part_i_plus1, const Mat& support_i_plus1, float selfSupportThreshold){
+Mat RegionSubtraction(const Mat& part_i, const Mat& part_i_plus1, const Mat& support_i_plus1, float selfSupportThreshold){
 
-    Mat support = Mat::zeros(slice_i.size(),slice_i.type());
-    Mat shadow = Mat::zeros(slice_i.size(),slice_i.type());
+    Mat support = Mat::zeros(part_i.size(),part_i.type());
+    Mat shadow = Mat::zeros(part_i.size(),part_i.type());
 
     subtract(part_i_plus1, part_i, shadow);
 
@@ -182,6 +181,152 @@ Mat RegionSubtraction(const Mat& slice_i, const Mat& part_i, const Mat& slice_i_
     subtract(support, part_i, support);
 
     return support;
+
+}
+
+//TODO: use centroidal voronoi tessellation to minimize anchor points
+Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
+
+    Mat anchor_point_image = Mat::zeros(support_i.size(),support_i.type());
+    Mat support_copy = support_i.clone();
+
+    int grid_res_x = 20;
+    int grid_res_y = 20;
+
+    vector<Point2i> anchorMap;
+
+    int grid_step_x = support_copy.size().width/grid_res_x;
+    int grid_step_y = support_copy.size().height/grid_res_y;
+
+    //First phase sample grid
+
+
+    for(int x = 0;x<support_copy.size().width;x+=grid_step_x){
+
+        for(int y = 0;y<support_copy.size().height;y+=grid_step_y){
+
+            if( support_copy.at<unsigned char>(x,y) == 255 ){
+
+                Point2i anchorPoint{x,y};
+
+                anchorMap.push_back(anchorPoint);
+                circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
+
+            }
+
+        }   
+
+    }
+
+    support_copy = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+
+    //Second phase scan along lines
+
+    for(int y = 0;y<support_copy.size().height;y+=grid_step_y){
+        
+        bool intersection_line_detected = false;
+        int intersection_begin = 0;
+
+        for(int x = 0;x<support_copy.size().width;x++){
+
+            if(support_copy.at<unsigned char>(x,y)==255 && !intersection_line_detected) {
+
+                intersection_line_detected = true;
+                intersection_begin = x;
+
+            }
+            
+            if(support_copy.at<unsigned char>(x,y)!=255 && intersection_line_detected) {
+
+                intersection_line_detected = false;
+
+                Point2i anchorPoint{x + (x-intersection_begin)/2,y};
+
+                anchorMap.push_back(anchorPoint);
+                circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
+                support_copy = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+                imwrite("testsupp.jpg",support_copy);
+                x = intersection_begin-1;
+
+            }
+
+        }   
+
+    }
+
+    for(int x = 0;x<support_copy.size().width;x+=grid_step_x){
+
+        bool intersection_line_detected = false;
+        int intersection_begin = 0;
+
+        for(int y = 0;y<support_copy.size().height;y++){
+
+            if(support_copy.at<unsigned char>(x,y)==255 && !intersection_line_detected) {
+
+                intersection_line_detected = true;
+                intersection_begin = y;
+
+            }
+            
+            if(support_copy.at<unsigned char>(x,y)!=255 && intersection_line_detected) {
+
+                intersection_line_detected = false;
+
+                Point2i anchorPoint{x, y + (y-intersection_begin)/2};
+
+                anchorMap.push_back(anchorPoint);
+                circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
+                support_copy = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+
+                y = intersection_begin-1;
+
+            }
+
+        }   
+
+    }
+
+    //Third phase scan pixel by pixel
+    for(int x = 0;x<support_copy.size().width;x++){
+
+        for(int y = 0;y<support_copy.size().height;y++){
+
+            if( support_copy.at<unsigned char>(x,y) == 255 ) {
+
+                Point2i anchorPoint{ x, y };
+                anchorMap.push_back(anchorPoint);
+
+                circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
+                support_copy = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+
+            }
+
+        }   
+
+    }
+
+    return anchor_point_image;
+
+}
+
+Mat RegionSubtractionSLA(const Mat& part_i, const Mat& part_i_plus1, const Mat& anchor_support_i_plus1, float selfSupportThreshold, float anchorRadius){
+
+    Mat anchorMap = Mat::zeros(part_i.size(),part_i.type());
+    Mat shadow = Mat::zeros(part_i.size(),part_i.type());
+    Mat PA_plus1 = Mat::zeros(part_i.size(),part_i.type());
+
+    subtract(part_i_plus1, part_i, shadow);
+    imwrite("shadowsla.jpg", shadow);
+    subtract(anchor_support_i_plus1, part_i, PA_plus1);
+    imwrite("paiplus.jpg", PA_plus1);
+
+    Mat support_candidate = GrowingSwallow(shadow, part_i, part_i_plus1, selfSupportThreshold);
+    Mat support_candidate2 = GrowingSwallow(support_candidate, PA_plus1, PA_plus1, anchorRadius);
+    
+    Mat anchor_candidate = GenerateAnchorMap(support_candidate2, anchorRadius);
+
+    bitwise_or(anchor_candidate, PA_plus1, anchorMap);
+    return anchorMap;
 
 }
 
@@ -200,14 +345,14 @@ int main(int argc, char const *argv[])
 
     Point3f boundingBoxCorner = sphere.getBoundingBoxCorner();
 
-    Mat M[sliceNumber+1];
+    Mat slice[sliceNumber+1];
 
     cout << "Resolution is: " << gridWidth << " x " << gridHeight << " x " << sliceNumber << endl;
  
     for(int z=0;z<sliceNumber+1;z++){
 
-        cout << "Doing slice #" << z << endl;
-        M[z].create(gridWidth, gridHeight, CV_8UC(1));
+        cout << "Sampling slice #" << z << endl;
+        slice[z].create(gridWidth, gridHeight, CV_8UC(1));
 
         for(int x = 0; x < gridWidth; x++)
         {
@@ -217,7 +362,7 @@ int main(int argc, char const *argv[])
 
                 Point3f evaluationPoint{boundingBoxCorner.x + x*filamentDiameter, boundingBoxCorner.y + y*filamentDiameter, boundingBoxCorner.z + z*filamentDiameter};
 
-                M[z].at<unsigned char>(x,y) = sphere.evaluate(evaluationPoint) >= 0.0f ? 0 : 255;
+                slice[z].at<unsigned char>(x,y) = sphere.evaluate(evaluationPoint) >= 0.0f ? 0 : 255;
 
             }
             
@@ -228,19 +373,26 @@ int main(int argc, char const *argv[])
     Mat support[sliceNumber+1];
     SimpleVolume<uint8_t> volData( Region(Vector3DInt32(0,0,0), Vector3DInt32(gridWidth, gridHeight, sliceNumber)));
 
+    support[sliceNumber] = Mat::zeros(slice[0].size(), slice[0].type());
+    for(int z=sliceNumber-1;z>=0;z--){
 
-    for(int z=0;z<sliceNumber;z++){
+        cout << "Generating support for layer #" << z << endl;
 
-        support[z].create(gridWidth, gridHeight, CV_8UC(1));
-        Mat shadow;
-        subtract( M[z+1], M[z], shadow);
-        support[z] = GrowingSwallow( shadow, M[z], M[z+1], 5.0f);
+        //support[z].create(gridWidth, gridHeight, CV_8UC(1));
+        //support[z] = RegionSubtractionSLA(slice[z], slice[z+1], support[z+1], 100.0f, 3.0f);
+
+        //Mat shadow;
+        //subtract( slice[z+1], slice[z], shadow);
+        //support[z] = GrowingSwallow( shadow, slice[z], slice[z+1], 3.0f);
+
+        support[z] = RegionSubtraction( slice[z], slice[z+1], support[z+1], 1.4f);
+
 
     }
 
     for(int z=0;z<sliceNumber;z++){
 
-        cout << "Doing slice #" << z << endl;
+        cout << "Creating voxel layer #" << z << endl;
 
         for(int x = 0; x < gridWidth; x++)
         {
