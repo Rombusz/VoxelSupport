@@ -102,11 +102,6 @@ string type2str(int type) {
   return r;
 }
 
-static void on_trackbar( int value, void* ptr)
-{
-
-}
-
 Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float selfSupportThreshold){
 
     Mat intersect = Mat::zeros(shadow.size(),shadow.type());
@@ -124,10 +119,14 @@ Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float 
 
     distanceTransform( invertedPart, closePoints, DIST_L2, CV_8U );
     
+#ifdef DEBUG
+
     imwrite("closePoints.jpg", closePoints);
     imwrite("partUp.jpg", partUp);
     imwrite("part.jpg", part);
     imwrite("shadow.jpg", support);
+
+#endif
 
     threshold( closePoints, closePoints, selfSupportThreshold , 255.0, THRESH_BINARY);
     closePoints.convertTo(closePoints, CV_8U);
@@ -135,8 +134,11 @@ Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float 
     Mat structuringElement = getStructuringElement( MORPH_RECT, Size( 3, 3 ) );
 
     int i=0;
+#ifdef DEBUG
 
     imwrite("closePointsThreshold.jpg", closePoints);
+
+#endif
 
     while( sum(substractResult) != Scalar(0.0) ){
 
@@ -145,20 +147,26 @@ Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float 
         subtract( dilation, intersect, substractResult );
         bitwise_and(substractResult, closePoints, substractTempResult);
 
+#ifdef DEBUG
         imwrite(to_string(i)+"subtractResult1.jpg", substractResult);
+#endif
+
         bitwise_and(substractTempResult, support, substractResult);
+
+#ifdef DEBUG
+
         imwrite(to_string(i)+"subtractResult2.jpg", substractResult);
+#endif
 
-
-        Mat tempIntersect = intersect.clone();
-
-        bitwise_or( tempIntersect, substractResult, intersect );
+        bitwise_or( intersect, substractResult, intersect );
 
         subtract( support, substractResult, support );
+#ifdef DEBUG
 
         imwrite(to_string(i)+"intersect.jpg", intersect);
         imwrite(to_string(i)+"dilation.jpg", dilation);
         imwrite(to_string(i)+"support.jpg", support);
+#endif
 
         i++;
 
@@ -199,15 +207,13 @@ Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
     int grid_step_y = support_copy.size().height/grid_res_y;
 
     //First phase sample grid
-
-
     for(int x = 0;x<support_copy.size().width;x+=grid_step_x){
 
         for(int y = 0;y<support_copy.size().height;y+=grid_step_y){
 
             if( support_copy.at<unsigned char>(x,y) == 255 ){
 
-                Point2i anchorPoint{x,y};
+                Point2i anchorPoint{y,x};
 
                 anchorMap.push_back(anchorPoint);
                 circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
@@ -218,8 +224,8 @@ Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
 
     }
 
-    support_copy = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
-
+    Mat sub = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+    subtract(support_copy, sub, support_copy);
     //Second phase scan along lines
 
     for(int y = 0;y<support_copy.size().height;y+=grid_step_y){
@@ -228,7 +234,7 @@ Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
         int intersection_begin = 0;
 
         for(int x = 0;x<support_copy.size().width;x++){
-
+            unsigned char wat = support_copy.at<unsigned char>(x,y);
             if(support_copy.at<unsigned char>(x,y)==255 && !intersection_line_detected) {
 
                 intersection_line_detected = true;
@@ -240,13 +246,14 @@ Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
 
                 intersection_line_detected = false;
 
-                Point2i anchorPoint{x + (x-intersection_begin)/2,y};
+                Point2i anchorPoint{y ,intersection_begin + (x-intersection_begin)/2};
 
                 anchorMap.push_back(anchorPoint);
                 circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
-                support_copy = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
-                imwrite("testsupp.jpg",support_copy);
+                sub = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+                subtract(support_copy, sub, support_copy);
                 x = intersection_begin-1;
+                intersection_begin=0;
 
             }
 
@@ -272,12 +279,12 @@ Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
 
                 intersection_line_detected = false;
 
-                Point2i anchorPoint{x, y + (y-intersection_begin)/2};
+                Point2i anchorPoint{intersection_begin + (y-intersection_begin)/2, x};
 
                 anchorMap.push_back(anchorPoint);
                 circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
-                support_copy = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
-
+                sub = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+                subtract(support_copy, sub, support_copy);
                 y = intersection_begin-1;
 
             }
@@ -293,11 +300,13 @@ Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
 
             if( support_copy.at<unsigned char>(x,y) == 255 ) {
 
-                Point2i anchorPoint{ x, y };
+                Point2i anchorPoint{ y, x };
                 anchorMap.push_back(anchorPoint);
 
                 circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
-                support_copy = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+                sub = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
+                subtract(support_copy, sub, support_copy);
+
 
             }
 
@@ -316,16 +325,17 @@ Mat RegionSubtractionSLA(const Mat& part_i, const Mat& part_i_plus1, const Mat& 
     Mat PA_plus1 = Mat::zeros(part_i.size(),part_i.type());
 
     subtract(part_i_plus1, part_i, shadow);
-    imwrite("shadowsla.jpg", shadow);
     subtract(anchor_support_i_plus1, part_i, PA_plus1);
-    imwrite("paiplus.jpg", PA_plus1);
 
     Mat support_candidate = GrowingSwallow(shadow, part_i, part_i_plus1, selfSupportThreshold);
     Mat support_candidate2 = GrowingSwallow(support_candidate, PA_plus1, PA_plus1, anchorRadius);
-    
+    imwrite("pap1.jpg",PA_plus1);
     Mat anchor_candidate = GenerateAnchorMap(support_candidate2, anchorRadius);
 
+    imwrite("anchor_cand.jpg",anchor_candidate);
     bitwise_or(anchor_candidate, PA_plus1, anchorMap);
+    imwrite("anchor_cand2.jpg",anchor_candidate);
+    imwrite("anchor_map.jpg",anchorMap);
     return anchorMap;
 
 }
@@ -334,7 +344,18 @@ static int selectedSlice = 0;
 
 int main(int argc, char const *argv[])
 {
-    
+    float anchorSupport = 10.0f;
+    float selfSupport = 5.0f;
+
+    if(argc == 3){
+        anchorSupport = stof(argv[2]);
+        selfSupport = stof(argv[1]);
+    }
+
+    if(argc == 2){
+        selfSupport = stof(argv[1]);
+    }
+
     ImplicitSphere sphere{Point3f(0,0,210),10};
 
     float filamentDiameter = 0.125f;
@@ -378,14 +399,8 @@ int main(int argc, char const *argv[])
 
         cout << "Generating support for layer #" << z << endl;
 
-        //support[z].create(gridWidth, gridHeight, CV_8UC(1));
-        //support[z] = RegionSubtractionSLA(slice[z], slice[z+1], support[z+1], 100.0f, 3.0f);
-
-        //Mat shadow;
-        //subtract( slice[z+1], slice[z], shadow);
-        //support[z] = GrowingSwallow( shadow, slice[z], slice[z+1], 3.0f);
-
-        support[z] = RegionSubtraction( slice[z], slice[z+1], support[z+1], 1.4f);
+        support[z].create(gridWidth, gridHeight, CV_8UC(1));
+        support[z] = RegionSubtractionSLA( slice[z], slice[z+1], support[z+1], selfSupport, anchorSupport);
 
 
     }

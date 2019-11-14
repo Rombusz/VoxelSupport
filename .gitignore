@@ -7,3 +7,5 @@ IFS_Support
 *.jpg
 libigl/
 build/Makefile
+Huang14.pdf
+*.obj
