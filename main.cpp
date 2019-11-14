@@ -12,99 +12,131 @@
 #include <OpenMesh/Tools/Utils/getopt.h>
 #include <vector>
 
-typedef OpenMesh::PolyMesh_ArrayKernelT<>  MyMesh;
+typedef OpenMesh::PolyMesh_ArrayKernelT<> MyMesh;
 
 using namespace cv;
 using namespace std;
 using namespace PolyVox;
 
-class ImplicitSurface{
+class ImplicitSurface
+{
 
-    public:
-        virtual float evaluate(const Point3f& point) const = 0;
-        virtual float getBoundingBoxWidth() const = 0;
-        virtual float getBoundingBoxHeight() const = 0;
-        virtual float getBoundingBoxDepth() const = 0;
-        virtual Point3f getBoundingBoxCorner() const = 0;
-
+public:
+    virtual float evaluate(const Point3f &point) const = 0;
+    virtual float getBoundingBoxWidth() const = 0;
+    virtual float getBoundingBoxHeight() const = 0;
+    virtual float getBoundingBoxDepth() const = 0;
+    virtual Point3f getBoundingBoxCorner() const = 0;
 };
 
-class ImplicitSphere : public ImplicitSurface{
+class SampledMesh : public ImplicitSurface
+{
 
-    public:
+private:
+    MyMesh m_mesh;
 
-        Point3f center;
-        float radius;
+public:
+    SampledMesh(MyMesh t_mesh) : m_mesh{t_mesh}
+    {
+    }
 
-        ImplicitSphere():center(Point3f(0,0,0)),radius(1){}
-
-        ImplicitSphere(const Point3f& center, float radius):center(center),radius(radius)
-        {
-
-        }
-
-        virtual float evaluate(const Point3f& point) const override{
-
-            float x_member = center.x - point.x;
-            float y_member = center.y - point.y;
-            float z_member = center.z - point.z;
-
-            return (x_member*x_member)+(y_member*y_member)+(z_member*z_member) - radius*radius;
-
-        }
-
-        virtual float getBoundingBoxWidth() const override{
-
-            return this->radius*2;
-
-        };
-
-        virtual float getBoundingBoxHeight() const override{
-
-            return this->radius*2;
-
-        };
-
-        virtual float getBoundingBoxDepth() const override{
-
-            return this->radius*2;
-
-        };
-
-        virtual Point3f getBoundingBoxCorner() const override{
-
-            return Point3f(this->center.x - this->radius, this->center.y - this->radius, this->center.z - this->radius);
-
-        };
-
+    float evaluate(const Point3f &point) const {};
+    float getBoundingBoxWidth() const {};
+    float getBoundingBoxHeight() const {};
+    float getBoundingBoxDepth() const {};
+    Point3f getBoundingBoxCorner() const {};
 };
 
-string type2str(int type) {
-  string r;
+class ImplicitSphere : public ImplicitSurface
+{
 
-  uchar depth = type & CV_MAT_DEPTH_MASK;
-  uchar chans = 1 + (type >> CV_CN_SHIFT);
+public:
+    Point3f center;
+    float radius;
 
-  switch ( depth ) {
-    case CV_8U:  r = "8U"; break;
-    case CV_8S:  r = "8S"; break;
-    case CV_16U: r = "16U"; break;
-    case CV_16S: r = "16S"; break;
-    case CV_32S: r = "32S"; break;
-    case CV_32F: r = "32F"; break;
-    case CV_64F: r = "64F"; break;
-    default:     r = "User"; break;
-  }
+    ImplicitSphere() : center(Point3f(0, 0, 0)), radius(1)
+    {
+    }
 
-  r += "C";
-  r += (chans+'0');
+    ImplicitSphere(const Point3f &center, float radius) : center(center), radius(radius)
+    {
+    }
 
-  return r;
+    virtual float evaluate(const Point3f &point) const override
+    {
+        float x_member = center.x - point.x;
+        float y_member = center.y - point.y;
+        float z_member = center.z - point.z;
+
+        return (x_member * x_member) + (y_member * y_member) + (z_member * z_member) - radius * radius;
+    };
+
+    virtual float getBoundingBoxWidth() const override
+    {
+        return this->radius * 2;
+    };
+
+    virtual float getBoundingBoxHeight() const override
+    {
+        return this->radius * 2;
+    };
+
+    virtual float getBoundingBoxDepth() const override
+    {
+        return this->radius * 2;
+    };
+
+    virtual Point3f getBoundingBoxCorner() const override
+    {
+        return Point3f(this->center.x - this->radius, this->center.y - this->radius, this->center.z - this->radius);
+    };
+};
+
+string type2str(int type)
+{
+    string r;
+
+    uchar depth = type & CV_MAT_DEPTH_MASK;
+    uchar chans = 1 + (type >> CV_CN_SHIFT);
+
+    switch (depth)
+    {
+    case CV_8U:
+        r = "8U";
+        break;
+    case CV_8S:
+        r = "8S";
+        break;
+    case CV_16U:
+        r = "16U";
+        break;
+    case CV_16S:
+        r = "16S";
+        break;
+    case CV_32S:
+        r = "32S";
+        break;
+    case CV_32F:
+        r = "32F";
+        break;
+    case CV_64F:
+        r = "64F";
+        break;
+    default:
+        r = "User";
+        break;
+    }
+
+    r += "C";
+    r += (chans + '0');
+
+    return r;
 }
 
-Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float selfSupportThreshold){
+Mat GrowingSwallow(const Mat &shadow, const Mat &part, const Mat &partUp, float selfSupportThreshold)
+{
 
-    Mat intersect = Mat::zeros(shadow.size(),shadow.type());
+    Mat intersect = Mat::zeros(shadow.size(), shadow.type());
 
     bitwise_and(part, partUp, intersect);
 
@@ -115,10 +147,10 @@ Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float 
     Mat support = shadow.clone();
     Mat invertedPart = part.clone();
 
-    bitwise_not(invertedPart,invertedPart);
+    bitwise_not(invertedPart, invertedPart);
 
-    distanceTransform( invertedPart, closePoints, DIST_L2, CV_8U );
-    
+    distanceTransform(invertedPart, closePoints, DIST_L2, CV_8U);
+
 #ifdef DEBUG
 
     imwrite("closePoints.jpg", closePoints);
@@ -128,58 +160,58 @@ Mat GrowingSwallow(const Mat& shadow, const Mat& part, const Mat& partUp, float 
 
 #endif
 
-    threshold( closePoints, closePoints, selfSupportThreshold , 255.0, THRESH_BINARY);
+    threshold(closePoints, closePoints, selfSupportThreshold, 255.0, THRESH_BINARY);
     closePoints.convertTo(closePoints, CV_8U);
 
-    Mat structuringElement = getStructuringElement( MORPH_RECT, Size( 3, 3 ) );
+    Mat structuringElement = getStructuringElement(MORPH_RECT, Size(3, 3));
 
-    int i=0;
+    int i = 0;
 #ifdef DEBUG
 
     imwrite("closePointsThreshold.jpg", closePoints);
 
 #endif
 
-    while( sum(substractResult) != Scalar(0.0) ){
+    while (sum(substractResult) != Scalar(0.0))
+    {
 
-        dilate( intersect, dilation, structuringElement  );
+        dilate(intersect, dilation, structuringElement);
 
-        subtract( dilation, intersect, substractResult );
+        subtract(dilation, intersect, substractResult);
         bitwise_and(substractResult, closePoints, substractTempResult);
 
 #ifdef DEBUG
-        imwrite(to_string(i)+"subtractResult1.jpg", substractResult);
+        imwrite(to_string(i) + "subtractResult1.jpg", substractResult);
 #endif
 
         bitwise_and(substractTempResult, support, substractResult);
 
 #ifdef DEBUG
 
-        imwrite(to_string(i)+"subtractResult2.jpg", substractResult);
+        imwrite(to_string(i) + "subtractResult2.jpg", substractResult);
 #endif
 
-        bitwise_or( intersect, substractResult, intersect );
+        bitwise_or(intersect, substractResult, intersect);
 
-        subtract( support, substractResult, support );
+        subtract(support, substractResult, support);
 #ifdef DEBUG
 
-        imwrite(to_string(i)+"intersect.jpg", intersect);
-        imwrite(to_string(i)+"dilation.jpg", dilation);
-        imwrite(to_string(i)+"support.jpg", support);
+        imwrite(to_string(i) + "intersect.jpg", intersect);
+        imwrite(to_string(i) + "dilation.jpg", dilation);
+        imwrite(to_string(i) + "support.jpg", support);
 #endif
 
         i++;
-
     }
 
     return support;
-
 }
 
-Mat RegionSubtraction(const Mat& part_i, const Mat& part_i_plus1, const Mat& support_i_plus1, float selfSupportThreshold){
+Mat RegionSubtraction(const Mat &part_i, const Mat &part_i_plus1, const Mat &support_i_plus1, float selfSupportThreshold)
+{
 
-    Mat support = Mat::zeros(part_i.size(),part_i.type());
-    Mat shadow = Mat::zeros(part_i.size(),part_i.type());
+    Mat support = Mat::zeros(part_i.size(), part_i.type());
+    Mat shadow = Mat::zeros(part_i.size(), part_i.type());
 
     subtract(part_i_plus1, part_i, shadow);
 
@@ -189,13 +221,14 @@ Mat RegionSubtraction(const Mat& part_i, const Mat& part_i_plus1, const Mat& sup
     subtract(support, part_i, support);
 
     return support;
-
 }
 
 //TODO: use centroidal voronoi tessellation to minimize anchor points
-Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
+//NOTE: Dynamic grid resolution?
+Mat GenerateAnchorMap(const Mat &support_i, float anchorRadius)
+{
 
-    Mat anchor_point_image = Mat::zeros(support_i.size(),support_i.type());
+    Mat anchor_point_image = Mat::zeros(support_i.size(), support_i.type());
     Mat support_copy = support_i.clone();
 
     int grid_res_x = 20;
@@ -203,141 +236,139 @@ Mat GenerateAnchorMap(const Mat& support_i, float anchorRadius){
 
     vector<Point2i> anchorMap;
 
-    int grid_step_x = support_copy.size().width/grid_res_x;
-    int grid_step_y = support_copy.size().height/grid_res_y;
+    int grid_step_x = support_copy.size().width / grid_res_x;
+    int grid_step_y = support_copy.size().height / grid_res_y;
 
     //First phase sample grid
-    for(int x = 0;x<support_copy.size().width;x+=grid_step_x){
+    for (int x = 0; x < support_copy.size().width; x += grid_step_x)
+    {
 
-        for(int y = 0;y<support_copy.size().height;y+=grid_step_y){
+        for (int y = 0; y < support_copy.size().height; y += grid_step_y)
+        {
 
-            if( support_copy.at<unsigned char>(x,y) == 255 ){
+            if (support_copy.at<unsigned char>(x, y) == 255)
+            {
 
-                Point2i anchorPoint{y,x};
+                Point2i anchorPoint{y, x};
 
                 anchorMap.push_back(anchorPoint);
                 circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
-
             }
-
-        }   
-
+        }
     }
 
     Mat sub = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
     subtract(support_copy, sub, support_copy);
     //Second phase scan along lines
 
-    for(int y = 0;y<support_copy.size().height;y+=grid_step_y){
-        
+    for (int y = 0; y < support_copy.size().height; y += grid_step_y)
+    {
+
         bool intersection_line_detected = false;
         int intersection_begin = 0;
 
-        for(int x = 0;x<support_copy.size().width;x++){
-            unsigned char wat = support_copy.at<unsigned char>(x,y);
-            if(support_copy.at<unsigned char>(x,y)==255 && !intersection_line_detected) {
+        for (int x = 0; x < support_copy.size().width; x++)
+        {
+            unsigned char wat = support_copy.at<unsigned char>(x, y);
+            if (support_copy.at<unsigned char>(x, y) == 255 && !intersection_line_detected)
+            {
 
                 intersection_line_detected = true;
                 intersection_begin = x;
-
             }
-            
-            if(support_copy.at<unsigned char>(x,y)!=255 && intersection_line_detected) {
+
+            if (support_copy.at<unsigned char>(x, y) != 255 && intersection_line_detected)
+            {
 
                 intersection_line_detected = false;
 
-                Point2i anchorPoint{y ,intersection_begin + (x-intersection_begin)/2};
+                Point2i anchorPoint{y, intersection_begin + (x - intersection_begin) / 2};
 
                 anchorMap.push_back(anchorPoint);
                 circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
                 sub = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
                 subtract(support_copy, sub, support_copy);
-                x = intersection_begin-1;
-                intersection_begin=0;
-
+                x = intersection_begin - 1;
+                intersection_begin = 0;
             }
-
-        }   
-
+        }
     }
 
-    for(int x = 0;x<support_copy.size().width;x+=grid_step_x){
+    for (int x = 0; x < support_copy.size().width; x += grid_step_x)
+    {
 
         bool intersection_line_detected = false;
         int intersection_begin = 0;
 
-        for(int y = 0;y<support_copy.size().height;y++){
+        for (int y = 0; y < support_copy.size().height; y++)
+        {
 
-            if(support_copy.at<unsigned char>(x,y)==255 && !intersection_line_detected) {
+            if (support_copy.at<unsigned char>(x, y) == 255 && !intersection_line_detected)
+            {
 
                 intersection_line_detected = true;
                 intersection_begin = y;
-
             }
-            
-            if(support_copy.at<unsigned char>(x,y)!=255 && intersection_line_detected) {
+
+            if (support_copy.at<unsigned char>(x, y) != 255 && intersection_line_detected)
+            {
 
                 intersection_line_detected = false;
 
-                Point2i anchorPoint{intersection_begin + (y-intersection_begin)/2, x};
+                Point2i anchorPoint{intersection_begin + (y - intersection_begin) / 2, x};
 
                 anchorMap.push_back(anchorPoint);
                 circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
                 sub = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
                 subtract(support_copy, sub, support_copy);
-                y = intersection_begin-1;
-
+                y = intersection_begin - 1;
             }
-
-        }   
-
+        }
     }
 
     //Third phase scan pixel by pixel
-    for(int x = 0;x<support_copy.size().width;x++){
+    for (int x = 0; x < support_copy.size().width; x++)
+    {
 
-        for(int y = 0;y<support_copy.size().height;y++){
+        for (int y = 0; y < support_copy.size().height; y++)
+        {
 
-            if( support_copy.at<unsigned char>(x,y) == 255 ) {
+            if (support_copy.at<unsigned char>(x, y) == 255)
+            {
 
-                Point2i anchorPoint{ y, x };
+                Point2i anchorPoint{y, x};
                 anchorMap.push_back(anchorPoint);
 
                 circle(anchor_point_image, anchorPoint, 1, Scalar(255), -1);
                 sub = GrowingSwallow(support_copy, anchor_point_image, anchor_point_image, anchorRadius);
                 subtract(support_copy, sub, support_copy);
-
-
             }
-
-        }   
-
+        }
     }
 
     return anchor_point_image;
-
 }
 
-Mat RegionSubtractionSLA(const Mat& part_i, const Mat& part_i_plus1, const Mat& anchor_support_i_plus1, float selfSupportThreshold, float anchorRadius){
+Mat RegionSubtractionSLA(const Mat &part_i, const Mat &part_i_plus1, const Mat &anchor_support_i_plus1, float selfSupportThreshold, float anchorRadius)
+{
 
-    Mat anchorMap = Mat::zeros(part_i.size(),part_i.type());
-    Mat shadow = Mat::zeros(part_i.size(),part_i.type());
-    Mat PA_plus1 = Mat::zeros(part_i.size(),part_i.type());
+    Mat anchorMap = Mat::zeros(part_i.size(), part_i.type());
+    Mat shadow = Mat::zeros(part_i.size(), part_i.type());
+    Mat PA_plus1 = Mat::zeros(part_i.size(), part_i.type());
 
     subtract(part_i_plus1, part_i, shadow);
     subtract(anchor_support_i_plus1, part_i, PA_plus1);
 
     Mat support_candidate = GrowingSwallow(shadow, part_i, part_i_plus1, selfSupportThreshold);
     Mat support_candidate2 = GrowingSwallow(support_candidate, PA_plus1, PA_plus1, anchorRadius);
-    imwrite("pap1.jpg",PA_plus1);
+    imwrite("pap1.jpg", PA_plus1);
     Mat anchor_candidate = GenerateAnchorMap(support_candidate2, anchorRadius);
 
-    imwrite("anchor_cand.jpg",anchor_candidate);
+    imwrite("anchor_cand.jpg", anchor_candidate);
     bitwise_or(anchor_candidate, PA_plus1, anchorMap);
-    imwrite("anchor_cand2.jpg",anchor_candidate);
-    imwrite("anchor_map.jpg",anchorMap);
+    imwrite("anchor_cand2.jpg", anchor_candidate);
+    imwrite("anchor_map.jpg", anchorMap);
     return anchorMap;
-
 }
 
 static int selectedSlice = 0;
@@ -347,115 +378,112 @@ int main(int argc, char const *argv[])
     float anchorSupport = 10.0f;
     float selfSupport = 5.0f;
 
-    if(argc == 3){
+    if (argc == 3)
+    {
         anchorSupport = stof(argv[2]);
         selfSupport = stof(argv[1]);
     }
 
-    if(argc == 2){
+    if (argc == 2)
+    {
         selfSupport = stof(argv[1]);
     }
 
-    ImplicitSphere sphere{Point3f(0,0,210),10};
+    ImplicitSphere sphere{Point3f(0, 0, 210), 10};
 
     float filamentDiameter = 0.125f;
 
-    int gridWidth = (int)sphere.getBoundingBoxWidth()/filamentDiameter;
-    int gridHeight = (int)sphere.getBoundingBoxDepth()/filamentDiameter;
-    int sliceNumber = (int)sphere.getBoundingBoxHeight()/filamentDiameter;
+    int gridWidth = (int)sphere.getBoundingBoxWidth() / filamentDiameter;
+    int gridHeight = (int)sphere.getBoundingBoxDepth() / filamentDiameter;
+    int sliceNumber = 1024;
 
     Point3f boundingBoxCorner = sphere.getBoundingBoxCorner();
 
-    Mat slice[sliceNumber+1];
+    Mat slice[sliceNumber + 1];
 
     cout << "Resolution is: " << gridWidth << " x " << gridHeight << " x " << sliceNumber << endl;
- 
-    for(int z=0;z<sliceNumber+1;z++){
+
+    for (int z = 0; z < sliceNumber + 1; z++)
+    {
 
         cout << "Sampling slice #" << z << endl;
         slice[z].create(gridWidth, gridHeight, CV_8UC(1));
 
-        for(int x = 0; x < gridWidth; x++)
+        for (int x = 0; x < gridWidth; x++)
         {
-            
-            for(int y = 0; y < gridHeight; y++)
+
+            for (int y = 0; y < gridHeight; y++)
             {
 
-                Point3f evaluationPoint{boundingBoxCorner.x + x*filamentDiameter, boundingBoxCorner.y + y*filamentDiameter, boundingBoxCorner.z + z*filamentDiameter};
+                Point3f evaluationPoint{boundingBoxCorner.x + x * filamentDiameter, boundingBoxCorner.y + y * filamentDiameter, boundingBoxCorner.z + z * filamentDiameter};
 
-                slice[z].at<unsigned char>(x,y) = sphere.evaluate(evaluationPoint) >= 0.0f ? 0 : 255;
-
+                slice[z].at<unsigned char>(x, y) = sphere.evaluate(evaluationPoint) >= 0.0f ? 0 : 255;
             }
-            
         }
-
     }
 
-    Mat support[sliceNumber+1];
-    SimpleVolume<uint8_t> volData( Region(Vector3DInt32(0,0,0), Vector3DInt32(gridWidth, gridHeight, sliceNumber)));
+    Mat support[sliceNumber + 1];
+    SimpleVolume<uint8_t> volData(Region(Vector3DInt32(0, 0, 0), Vector3DInt32(gridWidth, gridHeight, sliceNumber)));
 
     support[sliceNumber] = Mat::zeros(slice[0].size(), slice[0].type());
-    for(int z=sliceNumber-1;z>=0;z--){
+    for (int z = sliceNumber - 1; z >= 0; z--)
+    {
 
         cout << "Generating support for layer #" << z << endl;
 
         support[z].create(gridWidth, gridHeight, CV_8UC(1));
-        support[z] = RegionSubtractionSLA( slice[z], slice[z+1], support[z+1], selfSupport, anchorSupport);
-
-
+        support[z] = RegionSubtractionSLA(slice[z], slice[z + 1], support[z + 1], selfSupport, anchorSupport);
     }
 
-    for(int z=0;z<sliceNumber;z++){
+    for (int z = 0; z < sliceNumber; z++)
+    {
 
         cout << "Creating voxel layer #" << z << endl;
 
-        for(int x = 0; x < gridWidth; x++)
+        for (int x = 0; x < gridWidth; x++)
         {
-            
-            for(int y = 0; y < gridHeight; y++)
+
+            for (int y = 0; y < gridHeight; y++)
             {
 
-              volData.setVoxelAt(x,y,z,support[z].at<uint8_t>(x,y));
-
+                volData.setVoxelAt(x, y, z, support[z].at<uint8_t>(x, y));
             }
-            
         }
-
     }
 
     SurfaceMesh<PositionMaterialNormal> surfaceMesh;
-    CubicSurfaceExtractorWithNormals< SimpleVolume<uint8_t> > surfaceExtractor(&volData, volData.getEnclosingRegion(), &surfaceMesh);
+    CubicSurfaceExtractorWithNormals<SimpleVolume<uint8_t>> surfaceExtractor(&volData, volData.getEnclosingRegion(), &surfaceMesh);
 
     surfaceExtractor.execute();
-    
-    const vector<uint32_t>& vecIndices = surfaceMesh.getIndices();
-    const vector<PositionMaterialNormal>& vecVertices = surfaceMesh.getVertices();
-    
+
+    const vector<uint32_t> &vecIndices = surfaceMesh.getIndices();
+    const vector<PositionMaterialNormal> &vecVertices = surfaceMesh.getVertices();
+
     vector<MyMesh::VertexHandle> handles;
     MyMesh om_mesh;
 
-    for(int i=0; i < vecVertices.size();i++){
-
-      Vector3DFloat pos = vecVertices.at(i).getPosition();
-
-      handles.push_back(om_mesh.add_vertex( MyMesh::Point( pos.getX(), pos.getY(), pos.getZ() ) ));
-
-    }
-
-    for(int i=0; i < vecIndices.size()-2;i+=3){
-
-      int index0 = vecIndices.at(i);
-      int index1 = vecIndices.at(i+1);
-      int index2 = vecIndices.at(i+2);
-
-      om_mesh.add_face( { handles.at(index0) , handles.at(index1), handles.at(index2) } );
-
-    }
-
-    if (!OpenMesh::IO::write_mesh(om_mesh, "output.obj")) 
+    for (int i = 0; i < vecVertices.size(); i++)
     {
-      std::cerr << "write error\n";
-      exit(1);
+
+        Vector3DFloat pos = vecVertices.at(i).getPosition();
+
+        handles.push_back(om_mesh.add_vertex(MyMesh::Point(pos.getX(), pos.getY(), pos.getZ())));
+    }
+
+    for (int i = 0; i < vecIndices.size() - 2; i += 3)
+    {
+
+        int index0 = vecIndices.at(i);
+        int index1 = vecIndices.at(i + 1);
+        int index2 = vecIndices.at(i + 2);
+
+        om_mesh.add_face({handles.at(index0), handles.at(index1), handles.at(index2)});
+    }
+
+    if (!OpenMesh::IO::write_mesh(om_mesh, "output.obj"))
+    {
+        std::cerr << "write error\n";
+        exit(1);
     }
 
     return 0;
