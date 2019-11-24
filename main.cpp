@@ -13,12 +13,17 @@
 #include <OpenMesh/Core/Mesh/PolyConnectivity.hh>
 #include <vector>
 #include <memory>
+#include <algorithm>
+#include <cmath>
 
 typedef OpenMesh::PolyMesh_ArrayKernelT<> MyMesh;
 struct Ray
 {
 
-private:
+public:
+    OpenMesh::Vec3f m_point;
+    OpenMesh::Vec3f m_direction;
+
     //Getting intersection point by an algorithm found in ISBN: 1-55860-594-0 page 481
     OpenMesh::Vec3f faceIntersect(MyMesh &mesh, OpenMesh::FaceHandle &face) const
     {
@@ -61,10 +66,6 @@ private:
         return parameters;
     }
 
-public:
-    OpenMesh::Vec3f m_point;
-    OpenMesh::Vec3f m_direction;
-
     std::vector<float> intersect(MyMesh &t_mesh) const
     {
         // TODO divide space into cubes
@@ -85,7 +86,7 @@ public:
         return intersectionParams;
     }
 
-    OpenMesh::Vec3f getIntersectionPointAt(float t) const
+    OpenMesh::Vec3f getPointAt(float t) const
     {
         return m_point + m_direction * t;
     }
@@ -163,15 +164,50 @@ public:
     {
     }
 
-    void voxelize(const int t_resolutionX, const int t_resolutionY, const int t_resolutionZ)
+    MyMesh getRaysAsMesh(const int t_resolutionX, const int t_resolutionY, const int t_resolutionZ)
     {
 
-        if (m_volume)
-            m_volume.release();
+        MyMesh meshCopy;
 
         createBoundingBox();
 
-        m_volume = std::make_unique<PolyVox::SimpleVolume<uint8_t>>(PolyVox::Region(PolyVox::Vector3DInt32(0, 0, 0), PolyVox::Vector3DInt32(t_resolutionX, t_resolutionY, t_resolutionZ)));
+        auto corner = getBoundingBoxCorner();
+
+        float incrementX = getBoundingBoxWidth() / t_resolutionX;
+        float incrementY = getBoundingBoxHeight() / t_resolutionY;
+        float incrementZ = getBoundingBoxDepth() / t_resolutionZ;
+
+        for (int y = 0; y < t_resolutionY; y++)
+        {
+            Ray r;
+            OpenMesh::Vec3f rayStartPos{corner.x, corner.y + y * incrementY, corner.z};
+            for (int x = 0; x < t_resolutionX; x++)
+            {
+
+                rayStartPos[0] = corner.x + x * incrementX;
+
+                r.m_point = rayStartPos;
+                r.m_direction = OpenMesh::Vec3f{0, 0, 1};
+                //auto intersections = r.intersect(meshCopy);
+
+                //hack, you cant create lines in openmesh, so this is going to be a narrow triangle
+                auto vh1 = meshCopy.add_vertex(r.m_point);
+                auto vh2 = meshCopy.add_vertex(r.m_point + OpenMesh::Vec3f(0, 0, 0.001));
+                auto vh3 = meshCopy.add_vertex(r.getPointAt(10.0f));
+
+                meshCopy.add_face(vh1, vh2, vh3);
+            }
+        }
+
+        return meshCopy;
+    }
+
+    MyMesh getIntersections(const int t_resolutionX, const int t_resolutionY, const int t_resolutionZ)
+    {
+
+        MyMesh meshCopy;
+
+        createBoundingBox();
 
         auto corner = getBoundingBoxCorner();
 
@@ -192,49 +228,153 @@ public:
                 r.m_direction = OpenMesh::Vec3f{0, 0, 1};
                 auto intersections = r.intersect(m_mesh);
 
-                std::cout << std::endl;
+                std::sort(intersections.begin(), intersections.end(), [](float a, float b) { return a >= b; });
 
-                int intersectionIndex = 0;
-
-                bool isInside = false;
-                std::cout << "Ray start points: " << r.m_point << std::endl;
-                for (int z = 0; z < t_resolutionZ; z++)
+                //hack, you cant create lines in openmesh, so this is going to be a narrow triangle
+                auto vh1 = meshCopy.add_vertex(r.m_point);
+                auto vh2 = meshCopy.add_vertex(r.m_point + OpenMesh::Vec3f(0, 0, -0.1f));
+                std::cout << "(" << x << "," << y << "):" << std::endl;
+                for (auto t : intersections)
                 {
 
-                    PolyVox::Vector3DInt32 point{x, y, z};
+                    auto vec = r.getPointAt(t);
+                    auto vh3 = meshCopy.add_vertex(vec);
+                    meshCopy.add_face(vh2, vh3, vh1);
+                    std::cout << " Param " << t << " ( " << vec[0] << " " << vec[1] << " " << vec[2] << " ) , ";
+                }
 
-                    if (!intersections.empty() && intersectionIndex < intersections.size())
+                if (intersections.empty())
+                {
+
+                    auto vh3 = meshCopy.add_vertex(r.getPointAt(20.0f));
+                    meshCopy.add_face(vh2, vh3, vh1);
+                    std::cout << "Not found.";
+                }
+
+                std::cout << std::endl;
+            }
+        }
+
+        return meshCopy;
+    }
+
+    void voxelize(const int t_resolutionX, const int t_resolutionY, const int t_resolutionZ)
+    {
+
+        if (m_volume)
+            m_volume.release();
+
+        createBoundingBox();
+
+        m_volume = std::make_unique<PolyVox::SimpleVolume<uint8_t>>(PolyVox::Region(PolyVox::Vector3DInt32(0, 0, 0), PolyVox::Vector3DInt32(t_resolutionX, t_resolutionY, t_resolutionZ)));
+
+        auto corner = getBoundingBoxCorner();
+
+        float incrementX = getBoundingBoxWidth() / t_resolutionX;
+        float incrementY = getBoundingBoxHeight() / t_resolutionY;
+        float incrementZ = getBoundingBoxDepth() / t_resolutionZ;
+
+        std::tuple<Ray, std::vector<OpenMesh::FaceHandle>> rayContainer[t_resolutionY][t_resolutionX];
+
+        for (int y = 0; y < t_resolutionY; y++)
+        {
+            OpenMesh::Vec3f rayStartPos{corner.x, corner.y + y * incrementY + incrementY / 2, corner.z};
+            for (int x = 0; x < t_resolutionX; x++)
+            {
+                Ray r;
+
+                rayStartPos[0] = corner.x + x * incrementX + incrementX / 2;
+                r.m_point = rayStartPos;
+                r.m_direction = OpenMesh::Vec3f{0, 0, 1};
+
+                auto tuple = std::make_tuple(r, std::vector<OpenMesh::FaceHandle>());
+
+                rayContainer[y][x] = tuple;
+            }
+        }
+
+        for (auto face : m_mesh.faces())
+        {
+
+            std::array<OpenMesh::DefaultTraits::Point, 3> triangleVertexes;
+
+            int i = 0;
+            OpenMesh::PolyConnectivity::ConstFaceVertexIter vertex = m_mesh.fv_iter(face);
+
+            while (vertex.is_valid())
+            {
+                OpenMesh::Vec3f ver = m_mesh.point(vertex);
+                triangleVertexes[i] = ver;
+                ++vertex;
+                ++i;
+            }
+
+            float minX = std::min({(triangleVertexes[0][0] - corner.x), (triangleVertexes[1][0] - corner.x), (triangleVertexes[2][0] - corner.x)});
+            float minY = std::min({(triangleVertexes[0][1] - corner.y), (triangleVertexes[1][1] - corner.y), (triangleVertexes[2][1] - corner.y)});
+            float maxX = std::max({(triangleVertexes[0][0] - corner.x), (triangleVertexes[1][0] - corner.x), (triangleVertexes[2][0] - corner.x)});
+            float maxY = std::max({(triangleVertexes[0][1] - corner.y), (triangleVertexes[1][1] - corner.y), (triangleVertexes[2][1] - corner.y)});
+
+            size_t minXIndex = std::clamp((int)std::floor(minX / incrementX), 0, t_resolutionX - 1);
+            size_t minYIndex = std::clamp((int)std::floor(minY / incrementY), 0, t_resolutionY - 1);
+            size_t maxXIndex = std::clamp((int)std::floor(maxX / incrementX), 0, t_resolutionX - 1);
+            size_t maxYIndex = std::clamp((int)std::floor(maxY / incrementY), 0, t_resolutionY - 1);
+
+            for (int y = minYIndex; y <= maxYIndex; y++)
+            {
+                for (int x = minXIndex; x <= maxXIndex; x++)
+                {
+                    std::get<1>(rayContainer[y][x]).push_back(face);
+                }
+            }
+        }
+
+        for (int y = 0; y < t_resolutionY; y++)
+        {
+            for (int x = 0; x < t_resolutionX; x++)
+            {
+                auto ray = std::get<0>(rayContainer[y][x]);
+                auto faces = std::get<1>(rayContainer[y][x]);
+
+                std::vector<float> intersectionparams;
+
+                for (auto face : faces)
+                {
+
+                    //t,u,v coords
+                    auto intersection = ray.faceIntersect(m_mesh, face);
+
+                    if (intersection[0] >= 0.0f)
                     {
-
-                        OpenMesh::Vec3f ip = r.getIntersectionPointAt(intersections.at(intersectionIndex));
-
-                        if (ip[2] < r.m_point[2] + z * incrementZ)
-                        {
-                            isInside = !isInside;
-                        }
-                        else
-                        {
-                            intersectionIndex++;
-                        }
-                    }
-
-                    if (isInside)
-                    {
-                        m_volume->setVoxelAt(point, 255);
-                    }
-                    else
-                    {
-                        m_volume->setVoxelAt(point, 0);
+                        intersectionparams.push_back(intersection[0]);
                     }
                 }
 
-                std::cout << "Y part " << y << ", X part " << x << std::endl;
-                std::cout << "Size: " << intersections.size() << std::endl;
-                std::cout << "Intersections ";
-
-                for (float is : intersections)
+                if (!intersectionparams.empty())
                 {
-                    std::cout << is << std::endl;
+
+                    //std::sort(intersectionparams.begin(), intersectionparams.end(), [](float a, float b) { return a >= b; });
+                    std::sort(intersectionparams.begin(), intersectionparams.end());
+
+                    auto intersectionIterator = intersectionparams.begin();
+                    bool isInside = false;
+
+                    for (int z = 0; z < t_resolutionZ; ++z)
+                    {
+                        if ((z * incrementZ + incrementZ / 2) >= *intersectionIterator)
+                        {
+                            isInside = !isInside;
+                            ++intersectionIterator;
+                        }
+
+                        if (isInside)
+                        {
+                            m_volume->setVoxelAt(x, y, z, 255);
+                        }
+                        else
+                        {
+                            m_volume->setVoxelAt(x, y, z, 0);
+                        }
+                    }
                 }
             }
         }
@@ -661,8 +801,8 @@ int main(int argc, char const *argv[])
     }
 
     VoxelizedMesh voxel{in_mesh};
-
-    voxel.voxelize(5, 5, 5);
+    //MyMesh mesh2 = voxel.getIntersections(10, 10, 10);
+    voxel.voxelize(200, 200, 200);
 
     if (!OpenMesh::IO::write_mesh(voxel.getVoxelAsMesh(), "output2.obj"))
     {
